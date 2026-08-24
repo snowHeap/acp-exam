@@ -137,6 +137,11 @@ h3 { font-size: 17px; }
 .tag-primary { color: var(--primary-dark); background: var(--primary-soft); border-color: color-mix(in srgb, var(--primary) 25%, var(--line)); }
 .tag-priority { color: #8a5700; background: #fff1b8; border-color: #e6b84f; font-weight: 800; }
 .tag-optimized { color: var(--success); background: var(--success-soft); border-color: color-mix(in srgb, var(--success) 35%, var(--line)); font-weight: 700; }
+.knowledge-groups { display: grid; gap: 12px; }
+.knowledge-group { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); overflow: hidden; }
+.knowledge-group summary { cursor: pointer; display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 14px 16px; background: var(--soft); }
+.knowledge-group summary span { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.knowledge-group .key-point-list { margin: 0; padding: 16px 18px 18px 42px; }
 :root[data-theme="dark"] .tag-priority { color: #ffd878; background: #493915; border-color: #8a6a24; }
 
 .panel { padding: 24px; }
@@ -765,6 +770,423 @@ window.ACP_LESSONS = [
     traps: ["无限重试导致雪崩和重复扣费", "记录完整提示与回复却不做脱敏", "只监控平均延迟，忽略 P95/P99 长尾"]
   }
 ];
+
+Object.assign(window.ACP_TERMS, {
+  "seed": "随机种子：固定后可提高同参数请求的可复现性，但受模型版本、并行计算等影响，不能保证输出逐字相同。",
+  "stop": "停止序列：模型生成到指定字符串时停止；它控制结束位置，不负责校验答案内容。",
+  "presence_penalty": "存在惩罚：根据某个 Token 是否已经出现进行惩罚，正值通常鼓励引入新内容。",
+  "frequency_penalty": "频率惩罚：根据 Token 已出现次数进行惩罚，正值越大越抑制重复。",
+  "TTFT": "Time To First Token，首 Token 延迟：从请求发出到收到第一个 Token 的时间，决定用户多久看到开始输出。",
+  "TPOT": "Time Per Output Token，每输出 Token 时间：开始生成后持续输出的速度。",
+  "Context Cache": "上下文缓存：复用公共提示或多轮历史的计算结果，降低重复计算和成本；需注意缓存命中与内容新鲜度。",
+  "PEFT": "参数高效微调：冻结大部分基础模型，只训练少量新增或适配参数；LoRA、Adapter、Prompt Tuning 都属于此类。",
+  "Adapter Tuning": "适配器微调：在网络层间插入小型 Adapter 模块，只训练这些模块。",
+  "Prompt Tuning": "提示微调：学习一组连续向量形式的软提示，基础模型参数保持冻结。",
+  "HyDE": "Hypothetical Document Embeddings：先生成假想答案文档，再用它的向量检索真实文档，帮助补足用户短查询的语义。",
+  "Sentence-Window Retrieval": "句子窗口检索：先按句子精确命中，再带回命中句前后的窗口作为生成上下文，兼顾精确度和语境。",
+  "Auto-Merge Retrieval": "自动合并检索：将命中的相邻或同一父节点片段合并，减少碎片化上下文。",
+  "SimpleDirectoryReader": "LlamaIndex 的目录文档加载器，用于把指定目录中的文件读取为 Document 对象。",
+  "VectorStoreIndex": "LlamaIndex 的向量索引抽象：将 Document 切片、向量化并组织成可检索索引。",
+  "DSW": "PAI 的交互式建模开发环境，可配置 CPU/GPU 实例进行 Notebook、训练和调试。",
+  "EAS": "PAI 的在线模型服务，面向稳定推理部署，支持弹性、监控、灰度等能力。",
+  "FC": "函数计算（Function Compute）：事件驱动的 Serverless 计算服务，可按需弹性运行推理或异步任务，但要考虑冷启动。",
+  "Spot": "抢占式实例：价格较低但可能被回收，适合具备 checkpoint、重试和容错能力的任务。",
+  "ASR": "自动语音识别：把语音转成文字。",
+  "TTS": "语音合成：把文字转成语音。",
+  "ARTC": "阿里云实时音视频通信能力，关注低时延的音视频采集、传输和互动。"
+});
+
+const yuqueLessonNotes = {
+  "应用开发": [
+    "OpenAI 兼容模式的两个关键配置是 base_url 与 api_key；百炼兼容地址指向 DashScope，API Key 应通过环境变量或密钥服务管理。",
+    "Chat Completions 请求重点识别 model、messages、tools 与生成控制参数；常见返回内容位于 choices[0].message.content。",
+    "temperature 控制随机性，top_p 控制累计概率候选范围，top_k 控制候选数量；事实任务优先稳定，不要同时盲目放大多个采样参数。",
+    "seed 只能提高复现概率；max_tokens 限制最大输出长度；stop 控制停止序列；presence/frequency penalty 用于调节内容重复。",
+    "stream=True 改善首屏体感，不代表总计算量变少；离线大批量任务更关注 Batch、吞吐和单位成本。",
+    "上下文越长，延迟、干扰与费用通常越高；多轮对话要保留必要历史，并在接近窗口上限前做摘要或裁剪。"
+  ],
+  "提示词工程": [
+    "提示词六要素可记为：目标、上下文、角色、受众、样例、输出格式；它们是内容要素，不应死记为只能放进某一种消息角色。",
+    "【】、###、XML 标签等分隔符用于明确区分指令、输入数据和参考证据，降低模型把外部内容误当指令的概率。",
+    "Few-shot 解决风格、标签边界和格式不稳定；Meta Prompting 让模型评审或改写提示；两者作用不同。",
+    "LlamaIndex 会把检索结果与问题拼进内部模板；自定义 RAG Prompt 应通过模板接口替换，不是修改框架源代码。",
+    "提示词迭代可用“生成 → Critic 找差距 → Optimizer 改写 → Grader 回测”，并保持同一评测集比较版本。",
+    "推理模型适合多步推导和复杂代码；提示应简洁给出任务、背景与验收条件，不必机械要求输出冗长思维过程。"
+  ],
+  "RAG与评测": [
+    "先记全链路：解析 → Chunking → Embedding/索引 → 召回 → Rerank/阈值过滤 → 拼接 Prompt → 生成。排障必须先定位环节。",
+    "答错时先看 contexts：证据不在 contexts 是检索/知识覆盖问题；证据已经存在但仍答错，才重点排查生成模型和 Prompt。",
+    "Answer Correctness = 与 ground truth 的语义相似度 + 事实准确性；Answer Relevancy 看是否切题；Faithfulness 看是否受 contexts 支持。",
+    "Context Recall 关注该找的证据是否找全；Context Precision 关注召回内容是否相关且排在前面。放宽检索常提高 Recall，却可能降低 Precision。",
+    "切片选型：通用文档先考虑句子/结构切片；Markdown 按标题；碎片信息用 Sentence Window；专业长段可试语义切片；Token 受限再用定长 Token。",
+    "检索前用 Query Rewrite、同义词、HyDE、元数据过滤或多步分解提升召回；检索后用 Rerank 与相似度阈值降低噪声。",
+    "Rerank 只能重排初召回候选，无法找回完全漏掉的文档；TopN 也不应大于初召回 TopK。",
+    "上下文并非越长越好：噪声和 Lost in the Middle 会稀释关键证据，应控制知识浓度并保留引用与无答案兜底。"
+  ],
+  "微调与蒸馏": [
+    "提示词或 RAG 无法稳定教会逻辑步骤、格式和领域行为时，再考虑微调；需要频繁更新的事实知识仍优先 RAG。",
+    "全参微调更新全部权重；PEFT 只训练少量参数。LoRA 用低秩矩阵表示增量，基础权重保持冻结，便于小体积发布和回退。",
+    "LoRA rank 越高，容量和可训练参数越多，显存占用也上升；选择时共同考虑任务复杂度、数据量、基础模型与 GPU 显存。",
+    "先看曲线再调参：train/eval 都差是欠拟合；train 继续变好而 eval 变差是过拟合；Loss 不降或发散先检查学习率。",
+    "batch_size 与 LoRA rank 会影响单步显存峰值；epoch 改变训练总轮数和过拟合风险，不直接改变单步峰值。",
+    "checkpoint 应优先保存验证指标最佳版本并定期保存恢复点；部署可动态加载 LoRA，也可合并权重后独立部署。"
+  ],
+  "Agent与多模态": [
+    "Assistant API 对象关系：Assistant 定义模型/指令/工具，Thread 保存会话，Message 承载内容，Run 触发并跟踪一次执行。",
+    "典型顺序：Threads.create → Messages.create → Runs.create → Runs.wait；若 requires_action，则执行本地工具并 submit_tool_outputs 后继续等待。",
+    "Runs.wait 是阻塞等待 Run 终态，不是实时进度接口；Messages.list 只读取消息，不触发模型推理。",
+    "复杂任务可用 Planner → 执行 Agents → Summary；但固定流程优先 Workflow，只有路径需根据反馈动态变化时才增加 Agent 自主性。",
+    "意图路由先判断知识问答、翻译、审查或工具任务，再决定是否注入 RAG，上下文无关会造成干扰与浪费。",
+    "工具参数使用 JSON Schema，并配置权限、超时、最大步数、幂等与失败兜底，避免幻觉调用和无限循环。",
+    "语音链路常考 ASR → LLM/Agent → TTS → 实时下发；图像/视频链路要分别检查视觉理解、OCR、时间轴、采样率和合成渲染。"
+  ],
+  "生产与安全": [
+    "TTFT 决定多久出现第一个 Token，TPOT 决定开始后输出速度；流式输出主要改善 TTFT 体感，不等于缩短总计算时间。",
+    "性能优化优先减少无效计算：小模型路由、Context Cache、批处理、缩短输入输出、去重，以及用规则或传统算法处理确定性任务。",
+    "在线服务看 TTFT、P95/P99、QPS、错误率与成本；离线批任务看吞吐和单位任务成本，不能只看平均延迟。",
+    "百炼适合快速托管上线；FC 适合事件驱动但需考虑冷启动；EAS 适合稳定在线推理；ECS/ACK 控制力强但运维责任更大。",
+    "稳定性组合拳：超时 + 有限重试/退避 + 熔断 + 降级 + 幂等；无限重试会放大故障、成本和重复副作用。",
+    "安全要覆盖输入输出审核、知识库入口扫描、最小权限、工具执行前校验、KMS/传输加密、脱敏、审计与异常告警。",
+    "生产发布先定基线与 SLO，再做自动回归和小流量灰度；失败必须能快速回滚到已验证版本。"
+  ]
+};
+
+const comprehensiveLessonKnowledge = {
+  "应用开发": [
+    {
+      title: "API 调用与客户端配置",
+      points: [
+        "大模型应用通过 API 调用模型服务；OpenAI 兼容模式表示沿用兼容的请求结构，但 base_url 指向实际模型服务商，而不是固定指向 OpenAI。",
+        "百炼的 OpenAI 兼容 base_url 是 https://dashscope.aliyuncs.com/compatible-mode/v1；DashScope 是阿里云模型服务的调用入口。",
+        "创建客户端至少关注 base_url 与 api_key；api_key 应放在环境变量或密钥管理服务中，不能明文写进前端、代码仓库或日志。",
+        "常见能力接口包括 Chat Completions、Responses、Embeddings、Images、Audio、Assistants/Threads/Runs、Files、Batch、Fine-tuning 和 Realtime。",
+        "REST over HTTPS 描述通信方式；SDK 只是对 HTTP API 的封装，不会替应用自动保存业务状态或永久对话记忆。"
+      ]
+    },
+    {
+      title: "对话请求结构",
+      points: [
+        "client.chat.completions 的核心输入包括 model、messages、tools，以及生成控制和工具控制参数。",
+        "model 是模型名称；不同规格在能力、上下文长度、速度和成本上不同，不能只按参数量判断所有任务。",
+        "messages 是消息数组：system 设置角色、原则和边界；user 承载用户请求；assistant 保存先前模型回复或对话上下文。",
+        "常见非流式文本结果位于 response.choices[0].message.content；生产代码还要检查错误码、空结果、finish_reason 和结构校验。",
+        "普通接口通常无状态：继续多轮对话时，要把必要的历史 assistant 消息和新的 user 消息一起传回。"
+      ]
+    },
+    {
+      title: "生成与采样参数——每个参数单独记",
+      points: [
+        "stream=True：边生成边返回，降低用户等待第一个 Token 的体感，形成打字机效果；它不保证缩短总计算时间。离线大量生成更关注 Batch 和吞吐。",
+        "temperature：控制随机性与创造性。低值更稳定，适合事实问答、抽取、分类和代码；高值更发散，适合创意写作。降低 temperature 不能修复知识缺失或检索错误。",
+        "top_p：核采样的累计概率阈值。值小表示候选概率质量更集中，输出更聚焦；值大允许更多低概率候选，输出更多样。",
+        "top_k：只在概率最高的前 k 个 Token 中采样。k 小更稳定聚焦，k 大候选更多、随机性通常更强。注意 RAG 中的 top-k 是召回文档数，含义不同。",
+        "seed：固定随机种子可提高相同请求的复现概率，但模型版本、并行计算和服务实现变化都可能让结果不同，因此不是绝对可复现。",
+        "max_tokens：限制本次最多生成多少输出 Token；过小会截断答案，设置很大也不表示模型一定生成到上限。",
+        "stop：自定义停止序列；模型生成到该序列时停止。它只控制结束位置，不负责保证答案完整或正确。",
+        "presence_penalty：根据某个 Token 是否已经出现施加惩罚；正值通常鼓励引入新内容，负值更容易围绕已经出现的内容继续展开。",
+        "frequency_penalty：根据 Token 已出现次数施加惩罚；正值抑制高频重复，负值鼓励重复和呼应。诗歌可能允许重复，代码、法条和扩展话题通常更需要抑制无效重复。",
+        "enable_search：为支持该能力的通义千问模型开启联网搜索，通常通过 extra_body 传入；它解决时效信息获取，不等于普通 RAG 知识库检索。",
+        "考试判断：事实错误先查知识、检索和证据，不要把 temperature、top_p、top_k 当成万能纠错参数。"
+      ]
+    },
+    {
+      title: "多轮对话与上下文工程",
+      points: [
+        "多轮对话本质是多次 API 调用；每轮只保留完成当前任务必要的指令、历史和证据。",
+        "上下文越长，处理时间、费用和干扰信息通常越多，还可能触发截断或 Lost in the Middle。",
+        "输入 Token 和输出 Token 可能采用不同计费标准；需要同时控制历史长度、检索片段数量和最大输出长度。",
+        "接近上下文窗口上限时可做历史摘要，但必须保留系统指令、用户当前目标、未完成状态和关键事实。",
+        "上下文工程不只等于提示词，它还包括 RAG、工具结果、Memory 以及每一步信息的选择、排序和裁剪。"
+      ]
+    }
+  ],
+  "提示词工程": [
+    {
+      title: "提示词六要素与消息角色",
+      points: [
+        "六要素：任务目标、上下文、角色、受众、样例、输出格式。做题时先判断缺的是哪一项，不要只选‘让模型认真回答’。",
+        "角色决定以什么身份处理任务，受众决定表达深度和措辞；同一知识面向算法工程师和小学生时输出应不同。",
+        "任务目标说明做什么；上下文提供完成任务所需资料；输出格式规定怎样交付；样例用于展示边界、风格或结构。",
+        "这些是提示内容要素，不应死记为只能放在某一种消息角色中；system 常放长期规则，user 常放当前任务与数据。",
+        "###、【】、<<< >>>、XML 标签等分隔符可明确指令区、数据区和证据区，降低内容混淆。"
+      ]
+    },
+    {
+      title: "模板、样例与结构化输出",
+      points: [
+        "Zero-shot 不提供示例，适合任务简单、规则明确的情况；Few-shot 提供少量代表性输入输出，适合稳定格式、风格和标签边界。",
+        "样例不是越多越好：重复、冲突或无关样例会占用上下文并干扰模型，应优先覆盖边界案例。",
+        "要求 JSON/Markdown 只能提高格式倾向；生产系统还需 JSON Schema、字段校验、异常处理和有限重试。",
+        "LlamaIndex 会把检索片段和问题拼入 RAG Prompt；自定义模板应通过 PromptTemplate 和框架提供的更新接口完成，不是修改框架源代码。",
+        "RAG Prompt 应明确证据边界、引用方式和‘证据不足则说明不知道’，避免模型用参数记忆补编。"
+      ]
+    },
+    {
+      title: "推理、Meta Prompting 与迭代评测",
+      points: [
+        "复杂推理或计算任务需要明确目标、约束和验收条件；可要求给出可验证步骤，但不要把冗长思维过程当成正确性的保证。",
+        "Meta Prompting：让模型先充当提示词教练，评审初版提示、补全缺失结构或生成适合任务的提示模板。",
+        "参考答案驱动迭代：生成 → Critic 找差距 → Optimizer 改写 → 在固定评测集回测，逐步比较版本。",
+        "Grader 应输出明确维度和结构化分数，例如事实正确、完整、格式合规，而不是只有笼统的‘好/不好’。",
+        "通用模型通常更快、更便宜；推理模型适合多步推导、复杂代码调试和海量非结构化筛选。",
+        "对推理模型的提示应简洁说明任务和背景，并用示例澄清抽象要求；无需反复强制‘一步一步思考’。"
+      ]
+    },
+    {
+      title: "工程化落地",
+      points: [
+        "提示词和流程应配置化、版本化，使领域专家能参与修改，并能回滚到已验证版本。",
+        "提示词优化解决输入引导和格式问题；RAG 解决外部知识问题；微调解决稳定行为和任务能力问题，三者不要混用。",
+        "外部网页、文档和工具结果属于不可信数据；分隔符与提示约束有帮助，但不能代替最小权限、过滤和审计。",
+        "上线前应固定评测集比较提示版本，灰度观察业务指标，避免仅凭少数示例判断效果。"
+      ]
+    }
+  ],
+  "RAG与评测": [
+    {
+      title: "RAG 完整链路与排障顺序",
+      points: [
+        "完整链路：文档解析 → Chunking → Embedding → 建立索引 → Query 处理 → 初召回 → Rerank/过滤 → 拼接上下文 → 模型生成。",
+        "回答错误第一步先看知识库是否覆盖，再看本次 contexts 是否包含证据，最后才判断生成模型是否正确利用证据。",
+        "文档解析要保留标题、段落、列表、表格行列和图片文字；解析失败会直接限制后续召回上限。",
+        "Rerank 只能重排初召回候选，不能找回完全未进入候选集的文档；重排 TopN 不应大于初召回 TopK。",
+        "生成阶段要控制证据数量、排列顺序、引用和无答案兜底；上下文越多不代表答案越好。"
+      ]
+    },
+    {
+      title: "Ragas 指标——先分清评什么",
+      points: [
+        "Context Recall：参考答案需要的证据中，有多少能够被检索 contexts 支持；低表示漏召回或知识缺失。",
+        "Context Precision：检索结果中相关证据的占比和排序质量；低表示噪声多、弱相关内容靠前。",
+        "Answer Correctness：答案与 ground truth 的语义相似度加事实准确性；不包含 answer 与 query 的一致性。",
+        "Answer Relevancy：答案是否直接回应 query；答案切题仍可能事实错误。",
+        "Faithfulness：答案中的事实陈述能否由 contexts 支持；用于识别无依据生成。",
+        "放宽检索条件通常可能提高 Recall，却牺牲 Precision；收紧阈值则可能相反，这是典型查全率—查准率权衡。",
+        "评测数据至少准备 question、answer、ground_truth、contexts，并结合自动指标与领域专家抽检。",
+        "改一个策略后跑同一评测集，对比检索和生成指标，再保留优胜配置，形成回归闭环。"
+      ]
+    },
+    {
+      title: "文档结构与 Chunking 选型",
+      points: [
+        "固定长度切片实现简单，但容易切断句子和逻辑；Token 切片便于控制窗口，但不天然保留语义。",
+        "句子切片通用稳妥；Sentence-Window Retrieval 先命中句子，再带回前后窗口补充语境。",
+        "语义切片根据主题或语义断点分段，适合专业长文，但计算和实现成本更高。",
+        "Markdown 文档优先按标题层级切分，并把父标题补进 Chunk；表格应保留行列关系或转成键值结构。",
+        "Auto-Merge Retrieval 将相邻或同一父节点的小片段合并，减少检索上下文碎片化。",
+        "Chunk 过长会混入多个主题和噪声；过短会丢上下文。可用 overlap、父标题、窗口或自动合并进行补偿。",
+        "多主题、信息量大的文档更适合切小；简短、单主题文档不应为了等长继续细切。",
+        "主题混淆时优先补标题和 Metadata 标签；岗位、部门、日期、版本等属性可用于检索前过滤。"
+      ]
+    },
+    {
+      title: "Embedding、索引与存储",
+      points: [
+        "Embedding 把文本映射为向量；语义相近的内容向量距离更近，常用余弦相似度比较。",
+        "Embedding 模型必须与语言和领域匹配；索引和查询应使用兼容的同一向量空间。",
+        "LlamaIndex 的 SimpleDirectoryReader 负责读取目录文档，VectorStoreIndex.from_documents 用于切片、向量化并建立索引。",
+        "storage_context.persist 保存索引，load_index_from_storage 复用已建索引，避免每次启动重新向量化。",
+        "内存索引适合教学和快速试验；Milvus/Qdrant 需要运维；DashVector 等托管服务提供弹性、监控和向量+标量过滤。",
+        "索引不仅要存向量，还应保存原文、来源、权限、版本和更新时间，支持过滤、引用与审计。"
+      ]
+    },
+    {
+      title: "检索前优化与混合检索",
+      points: [
+        "Query Rewrite 将口语、歧义或省略表达改写为适合检索的查询；同义词和领域词表能覆盖不同说法。",
+        "复杂问题可用多步查询分解，分别检索子问题再汇总；不要期望一次短查询覆盖全部条件。",
+        "HyDE 先生成假想答案文档，再用其向量检索真实文档，适合用户查询过短或表达与知识库差异较大时。",
+        "元数据过滤先按部门、岗位、日期、权限等缩小候选，再做向量相似度，能减少模板相似造成的误召回。",
+        "BM25 擅长编号、产品名和精确关键词；向量检索擅长语义近义表达；Hybrid Search 结合两者。",
+        "不同检索器的原始分数尺度可能不同，融合前应归一化或使用 RRF 等基于名次的方法。",
+        "问题信息不足时，反问澄清往往比盲目扩大 top-k 更有效。"
+      ]
+    },
+    {
+      title: "检索后与生成阶段优化",
+      points: [
+        "先用较大的 TopK 保证候选覆盖，再由 Reranker 精排到较小 TopN；候选没召回时增加 Reranker 无效。",
+        "Similarity Threshold 过滤弱相关片段；阈值过高会漏召回，过低会引入噪声。",
+        "Context Precision 低优先做去重、过滤和 Rerank；Context Recall 低优先查知识覆盖、解析、切片、改写、Embedding 和 TopK。",
+        "Answer Correctness 低且 contexts 已正确时，再优化生成 Prompt、temperature、模型能力或微调。",
+        "Lost in the Middle 表示长上下文中间证据更容易被忽略；关键证据应精简并合理排序。",
+        "生产知识库还要处理增量更新、旧版本下线、权限过滤、来源引用和‘没有证据就不回答’。"
+      ]
+    }
+  ],
+  "微调与蒸馏": [
+    {
+      title: "何时微调与方法选择",
+      points: [
+        "微调用定向标注数据塑造任务行为、格式或领域能力；频繁变化、需要引用的事实知识优先用 RAG。",
+        "全参微调更新全部模型权重，成本和显存高；PEFT 冻结大部分基础参数，只训练少量适配参数。",
+        "LoRA 用低秩矩阵 A、B 表示权重增量，不直接修改基础权重；适配器体积小，便于发布、切换和回退。",
+        "Adapter Tuning 插入小型适配层；Prompt Tuning 学习连续软提示；它们都属于参数高效微调。",
+        "蒸馏由教师模型向学生模型传递软标签、示范或偏好；量化只是降低数值精度，两者目的不同。"
+      ]
+    },
+    {
+      title: "LoRA rank 与资源",
+      points: [
+        "rank（r）决定低秩矩阵容量；r 越高通常表达能力越强，同时可训练参数、梯度、优化器状态和显存开销增加。",
+        "选择 rank 要综合训练数据量、任务复杂度、基础模型规模和 GPU 显存，不能说显存与 rank 无关。",
+        "小数据使用过高 rank 更容易过拟合；复杂任务和足够高质量数据可尝试更高 rank，但必须用验证集选择。",
+        "batch_size 和 LoRA rank 会影响单步显存峰值；epoch 改变总训练轮数，不直接改变单步峰值。",
+        "LoRA 降低的是可训练参数和相关训练状态，基础模型权重、激活和 KV 等仍会占用资源。"
+      ]
+    },
+    {
+      title: "数据集与训练超参数",
+      points: [
+        "数据质量优先于盲目增加数量：样本应准确、覆盖真实场景、类别平衡，并严格隔离训练集、验证集和测试集。",
+        "learning_rate 控制更新步长；过大可能震荡或发散，过小收敛慢。Loss 不降或上升时先检查学习率。",
+        "batch_size 影响显存、吞吐和梯度稳定性；更大不一定泛化更好。",
+        "epoch 是完整遍历训练集的次数；太少可能欠拟合，太多可能过拟合。",
+        "eval_steps 决定多频繁在验证集评估；max_length 决定单样本长度并显著影响激活显存。",
+        "数据不足时可由强模型辅助生成候选样本，但仍需人工校验、去重、授权和隐私检查。"
+      ]
+    },
+    {
+      title: "曲线判读、早停与 Checkpoint",
+      points: [
+        "train loss 和 validation loss 都高、效果都差，通常是欠拟合，可增加有效训练、数据或模型容量。",
+        "train loss 继续下降而 validation loss 上升，是典型过拟合，应早停、增加/清洗数据、正则化或降低训练强度。",
+        "Early Stopping 的 patience 表示验证指标连续多少次不改善后停止；停止后应恢复验证集最佳 checkpoint。",
+        "训练监控常看训练时间、Loss 和任务准确率；生成速度是推理指标，batch size 是超参数。",
+        "定期 checkpoint 用于中断恢复，best checkpoint 用于最终选择；只保存最后一轮并不可靠。"
+      ]
+    },
+    {
+      title: "评测与部署",
+      points: [
+        "微调前后必须在同一独立测试集 A/B 对比，除了准确率，还要检查格式、稳定性、安全和业务指标。",
+        "BLEU、ROUGE、Perplexity 适用于不同生成评测场景，不能用单一指标代表全部业务效果。",
+        "部署 LoRA 可动态加载基础模型+适配器，便于多任务切换；也可合并权重导出完整模型，便于独立部署。",
+        "量化可降低显存和推理成本，但必须回归评测精度；蒸馏适合让更小学生模型获得教师模型近似能力。",
+        "训练成本取决于总 Token、吞吐、卡数、训练时长和资源单价，不能只看模型文件大小。"
+      ]
+    }
+  ],
+  "Agent与多模态": [
+    {
+      title: "Assistant API 对象与执行链",
+      points: [
+        "Assistant 定义模型、instructions 和 tools；Thread 是会话容器；Message 承载消息；Run 触发并跟踪一次执行。",
+        "典型顺序：Threads.create → Messages.create → Runs.create → Runs.wait。",
+        "若 Run 返回 requires_action，应用解析工具调用、执行本地函数并 submit_tool_outputs，然后再次等待模型继续。",
+        "Runs.create 发起模型运行；Runs.wait 阻塞等待终态；提交工具输出会让模型继续处理；Messages.list 只读取消息。",
+        "工具参数应使用 JSON Schema，工具名必须映射到受控本地函数；模型提出调用不等于应用必须无条件执行。"
+      ]
+    },
+    {
+      title: "单 Agent、多 Agent 与路由",
+      points: [
+        "固定、稳定、可审计的步骤优先 Workflow；执行路径需根据环境反馈动态变化时才使用 Agent。",
+        "复杂任务可用 Planner 拆解 → 执行 Agents 分工 → Summary 汇总，但要定义职责、共享状态和失败处理。",
+        "意图路由先判断知识问答、翻译、审查、闲聊或工具任务，再选择 RAG、直接 LLM 或具体工具。",
+        "只在知识问答意图中注入相关检索上下文，避免无关 RAG 内容干扰翻译、审查或闲聊。",
+        "复杂复合意图应拆成可验证的子任务；一次让一个 Agent 同时查询、审批、总结容易漏步骤。",
+        "输出给程序编排时使用明确枚举或结构化格式，并为解析失败设置兜底路由。"
+      ]
+    },
+    {
+      title: "Agent 工程安全",
+      points: [
+        "instructions 应明确每个工具何时可用、输入要求和禁止事项，减少幻觉调用。",
+        "必须设置最大步数、超时、有限重试、停止条件和幂等，避免循环调用和重复副作用。",
+        "工具执行前校验身份、权限、参数和资源范围；提示词不能代替访问控制。",
+        "Memory 保存跨步骤信息，Skill 封装可复用流程，Tool 执行外部动作；三者作用不同。",
+        "多 Agent 增加通信、冲突和成本；只有职责确实可分解时才值得使用。"
+      ]
+    },
+    {
+      title: "多模态链路与故障定位",
+      points: [
+        "语音助手链路：ASR 流式转写 → LLM/Agent 决策 → TTS 流式合成 → ARTC 等实时链路下发。",
+        "图片理解常结合视觉模型、OCR 和版面分析，再做结构化字段抽取与规则/Agent 后处理。",
+        "动画/视频生成链路：需求 → 剧本 → 分镜和素材 → 配音/合成 → 渲染发布，适合多步骤编排。",
+        "返回静态图而非视频，先查是否错误调用文生图模型；特定物体漏检，查视觉数据和模型能力。",
+        "音画不同步要分别检查音频采样率、时长、帧率和时间轴；不能用提高语言模型 temperature 修复。",
+        "实时多模态系统还要关注网络延迟、流式处理、缓冲、不同模态时间戳对齐和失败降级。"
+      ]
+    }
+  ],
+  "生产与安全": [
+    {
+      title: "性能指标与场景侧重点",
+      points: [
+        "TTFT 是从请求到第一个 Token 的时间，决定首屏等待；TPOT 是开始生成后每个输出 Token 的时间，决定持续输出速度。",
+        "流式输出主要降低感知等待，不一定减少总计算时间、总 Token 或费用。",
+        "对话和搜索高度关注 TTFT；代码补全同时关注 TTFT 与 TPOT；长文离线处理更关注总吞吐和成本。",
+        "平均延迟会掩盖少量极慢请求，应同时观察 P95/P99、错误率、超时和 QPS。",
+        "上线前定义 SLO 和基线模型；CI/CD 自动阻断低于基线的版本，再通过小流量灰度验证。"
+      ]
+    },
+    {
+      title: "端到端性能优化",
+      points: [
+        "能用小模型、蒸馏模型或规则解决的任务，不要默认调用最大模型；模型路由应按任务难度选择。",
+        "量化 INT8/INT4/FP16 降低显存和计算成本；剪枝、蒸馏也能压缩模型，但都必须回归质量。",
+        "Context Cache 复用公共前缀或多轮历史计算，降低重复计算；需权衡缓存命中、一致性和新鲜度。",
+        "Batching 合并请求可提高硬件利用率和吞吐，但可能增加单请求等待，因此在线与离线策略不同。",
+        "减少输入 Token：只保留必要历史和证据、长文先摘要；减少输出 Token：明确简短格式并设置合理 max_tokens。",
+        "确定性标准回复、查表、哈希、二分和传统 UI 组件优先用普通程序完成，避免让 LLM 处理一切。",
+        "并行化包括数据并行、模型并行和流水线并行；选择取决于模型规模、显存和服务架构。"
+      ]
+    },
+    {
+      title: "用户体验、错误处理与降级",
+      points: [
+        "流式返回、分块处理、阶段提示和进度展示可以在不改变模型算力时改善用户感知。",
+        "错误文案要说明用户能做什么；自动重试必须限制次数并使用退避，不能无限重试。",
+        "下游持续失败时使用熔断，避免请求继续堆积；高负载或故障时用小模型、缓存、模板或规则降级。",
+        "具有副作用的操作要使用幂等键，避免超时重试导致重复扣费、重复提交或重复通知。",
+        "内嵌用户反馈入口，结合 Bad Case、日志和评测集形成持续优化闭环。"
+      ]
+    },
+    {
+      title: "成本与部署选型",
+      points: [
+        "成本与性能常协同优化：小模型、Context Cache、Batch、减少 Token 和避免无效调用都能降本。",
+        "托管百炼 API 启动快、免运维，但要关注 QPM/TPM、配额、模型版本和调用费用。",
+        "FC 适合低频、异步或事件触发任务，支持弹性但有冷启动；不能把 Serverless 理解为永远零延迟。",
+        "PAI-EAS 面向稳定在线推理，支持预热、监控、灰度等；Spot 实例成本低但可能被回收，必须有容错。",
+        "ECS/ACK/ACS 控制力更强，适合复杂依赖和成熟 DevOps，同时承担更多运维、容量和安全责任。",
+        "自建 vLLM 需压测 QPS、平均/尾延迟、超时错误和并发—时延关系，不能只确认接口能调用。",
+        "显存估算至少考虑模型权重和 KV Cache；长上下文与高并发会显著扩大 KV Cache。"
+      ]
+    },
+    {
+      title: "稳定性、监控与发布",
+      points: [
+        "自动扩缩容配合负载均衡和健康检查；扩容速度、预热和最小实例数会影响突发流量表现。",
+        "监控看板至少包含正确率/业务质量、TTFT、TPOT、QPS、P95/P99、错误率、Token 与成本。",
+        "可观测性由 Log、Metric、Trace 组成，还应记录模型、Prompt、知识库和检索证据版本。",
+        "检测数据漂移和用户意图变化，定期回归真实流量样本，不能只依赖上线前测试集。",
+        "容灾包括多可用区/多地域、备份模型或规则兜底，并通过定期演练确认真正可切换。",
+        "灰度发布先让小比例流量使用新版本，达标后扩大；异常时快速回滚到已验证基线。"
+      ]
+    },
+    {
+      title: "安全与合规",
+      points: [
+        "输入与输出双向审核，覆盖越狱、提示注入、敏感信息、恶意代码和幻觉风险；自定义词库应集中维护。",
+        "知识库上传阶段扫描文档安全性和来源，防止 Data Poisoning；查询阶段执行权限和 Metadata 过滤。",
+        "Agent 工具执行前进行参数校验、最小权限、人工确认或风险阈值控制，并记录完整审计链。",
+        "基础设施使用 VPC、云防火墙、主机加固、KMS 静态加密、TLS 传输加密和 RAM 最小权限。",
+        "DDoS 防护组合包括 DDoS 高防、WAF、应用层限流、配额和成本熔断；WAF 不能单独解决语义型提示注入。",
+        "日志、训练集和评测集中的 PII 要脱敏并限制访问；API Key 不能出现在前端或公开仓库。",
+        "面向公众提供生成式 AI 服务还需关注适用的备案、AIGC 标识、用户告知、内容治理和责任主体要求。"
+      ]
+    }
+  ]
+};
+
+for (const lesson of window.ACP_LESSONS) {
+  lesson.sourceNote = "已融合语雀《大模型ACP的知识点》";
+  lesson.sourceNotes = yuqueLessonNotes[lesson.module] || [];
+  lesson.knowledgeSections = comprehensiveLessonKnowledge[lesson.module] || [];
+}
 
 </script>
   <script>
@@ -7788,6 +8210,138 @@ window.ACP_QUESTIONS.push(
     answer: ["B"],
     explanation: "Reranker 只能对已有候选重新排序，不能找回初召回中完全不存在的文档。系统原题 7 考查“已召回但排序差”，本题补充相反边界：“未召回时 Rerank 无能为力”。",
   });
+
+  // 三份 PDF 重复题与题内答案冲突核验（2026-08-24）
+  update("pdf-6", {
+    answer: ["A", "B", "F"],
+    explanation: "A 按语义边界切分，B 为切片补充标题等上下文，F 按标题、段落和列表结构保留语义单元，均符合语义完整性理念。C 属于面向代码结构的专用切片；D 是机械定长切片；E 把表格拆到单元格级会丢失行列关系。",
+  });
+  update("pdf-8", {
+    explanation: "A、C、D、E 都是现阶段大模型的真实局限：提示词不能完全消除错误，专业术语可能被误解，含糊查询会导致偏题，翻译任务若未明确源语言与目标语言也可能产生歧义。B 的“完全成熟、无差错”是绝对化错误表述。",
+  });
+  update("pdf-66", {
+    answer: ["C"],
+    explanation: "按营销表达类别逐条检查，能为每一类设置明确判定标准，降低模型一次处理过多目标时的漏检。A 只查事实错误，B 是修改而非检测，D 一次性输出所有类型容易遗漏细分类别。",
+  });
+  update("pdf-77", {
+    explanation: "多主题、信息量大的文档最适合切成更小块，使每个 Chunk 聚焦单一主题，提高检索精度。简短、单主题文档继续细切反而容易丢失上下文。",
+  });
+  update("pdf-121", {
+    explanation: "B 把岗位名拼进二级标题，使每个 Chunk 自带岗位语境；C 用岗位标签过滤并结合向量检索，可在召回前限定候选范围。A 的 Rerank 只能重排已召回内容，不能从根源消除模板造成的岗位混淆；D 提高 temperature 只会增加随机性。",
+  });
+  update("pdf-117", {
+    question: "选择 LoRA 秩（rank，记作 r）时需考虑哪些因素？",
+    explanation: "训练数据量和任务复杂度影响所需适配容量，基础模型规模影响 LoRA 参数总量；rank 越高，可训练参数和显存开销通常越大，所以 GPU 显存也是实际约束。四项都应考虑。原题中的“LoRA 权重”已修正为“LoRA 秩”。",
+  });
+  update("pdf-123", {
+    answer: ["A", "D"],
+    explanation: "batch_size 增大会同时保留更多样本的输入、激活与梯度；LoRA rank 增大会增加可训练参数、梯度和优化器状态，两者都会抬高单步显存峰值。evaluation_step 和 epoch 改变评估频率或总训练轮数，不直接改变单步峰值。",
+  });
+  update("pdf-128", {
+    answer: ["B", "C", "D"],
+    explanation: "静态图说明生成链路可能只调用了文生图模型（C）；漏识别冲浪板说明视觉模型的对应物体数据或能力不足（B）；音画不同步应重点核查语音采样率、时长等音频参数（D）。A 是通用剪辑排查项，但本题强调多模态组件链路，D 更直接对应语音模型输出。",
+  });
+  update("pdf-173", {
+    options: [
+      { key: "A", text: "检查检索环节的 Embedding 模型是否能分辨相似文本段" },
+      { key: "B", text: "检查目标疾病的相关内容是否存在于知识库中" },
+      { key: "C", text: "检查计算资源是否充足" },
+      { key: "D", text: "检查大模型能否依据给定知识正确回答" },
+    ],
+    answer: ["B"],
+    explanation: "RAG 排障顺序先看“有没有知识”，再看“能否检索到”，最后看“能否正确生成”。如果知识库本身没有目标疾病内容，后续 Embedding 和生成优化都无法补回证据，因此先选 B。原题中的“训练集”属于文字提取错误，已按同题语义改为“目标疾病”。",
+  });
+  update("pdf-191", {
+    answer: ["B"],
+    explanation: "攻击源是用户上传的恶意文档，长期根治应在知识库入口做内容安全扫描、来源校验和隔离，阻止污染内容进入检索链路。A、C 是输出端补救且会影响正常代码问答；D 的数字签名只能验证来源或完整性，不能证明内容安全。",
+  });
+  update("pdf-201", {
+    explanation: "Ragas 的 Answer Correctness 由两部分加权得到：答案与 ground truth 的语义相似度（B），以及基于二者陈述计算的事实准确性（D）。答案与 context 的关系更接近忠实度，答案与 query 的关系更接近 Answer Relevancy。",
+  });
+  update("pdf-207", {
+    answer: ["E"],
+    explanation: "Runs.wait 会阻塞当前调用，直到 Run 进入 completed、failed、cancelled、expired 或 requires_action 等终态后返回。它不是实时进度流，也不会自行等待并提交所有工具输出；遇到 requires_action 时仍需应用提交工具结果。",
+  });
+  update("pdf-214", {
+    answer: ["A", "E", "F"],
+    explanation: "训练时间衡量训练效率，Loss 反映优化和收敛情况，准确率可在有明确标签的任务中观察训练效果。生成速度属于推理指标，batch size 是超参数而非监控结果，精准率通常是特定分类任务的专项指标。",
+  });
+  update("pdf-218", {
+    answer: ["A"],
+    explanation: "按字符、Token 长度和语义边界切分都是常见 Chunking 方法；按词性（名词、动词等）切分不能稳定保留完整语义单元，不属于常见文档切片策略。",
+  });
+  update("pdf-239", {
+    type: "multiple",
+    question: "以下哪些用户查询语句无法有效地指导大模型进行文本摘要？",
+    answer: ["B", "C"],
+    explanation: "B 要求的是关键词抽取，C 要求的是翻译，二者都不是文本摘要。A 是一般摘要，D 是有长度限制的压缩摘要，E 是一句话摘要。原题用单选问法却同时存在两个不属于摘要的选项，已修正为多选题。",
+  });
+  update("pdf-242", {
+    answer: ["B"],
+    explanation: "按营销表达类别逐条识别可以分别检查夸张承诺、诱导购买、绝对化用语等类型，覆盖更完整。一次性要求模型同时输出全部类型容易因任务拥挤而漏检。",
+  });
+  update("pdf-306", {
+    explanation: "提示词注入不能只靠另一段提示词或敏感词黑名单抵御。应在检索前执行身份鉴别、最小权限、数据范围过滤和异常告警，让模型即使被诱导也拿不到无权访问的数据，因此选 C。",
+  });
+  update("pdf-333", {
+    answer: ["C"],
+    explanation: "上千条内部术语无法靠少量示例或穷举 Prompt 稳定覆盖。接入受控的专业术语库并用 RAG 动态检索，可在翻译每一段时提供对应标准译法，减少示例数量并保证一致性。",
+  });
+  update("pdf-336", {
+    answer: ["E"],
+    explanation: "Runs.wait 的核心作用是阻塞等待 Run 到达终态。它不会自动完成外部工具调用；当返回 requires_action 时，应用仍需执行工具并提交结果后再次等待。",
+  });
+  update("pdf-338", {
+    answer: ["A", "B", "C", "D"],
+    explanation: "LoRA rank 决定低秩更新矩阵的容量。复杂任务和更多有效训练数据可能需要更高 rank；基础模型规模影响适配参数总量；更高 rank 会增加可训练参数和显存开销，所以 GPU 显存也是实际选型约束。",
+  });
+  update("pdf-352", {
+    explanation: "静态图对应文生图/文生视频链路选错（C），特定物体漏检对应视觉训练数据或识别能力不足（B），音画不同步应核查语音采样率与时长参数（D），因此选 B、C、D。",
+  });
+  update("pdf-354", {
+    explanation: "模型可能绕过提示词规则，关键词过滤也容易被改写规避。检索前实施最小权限和数据范围过滤，才能从权限边界阻止未授权元数据进入上下文，因此选 D。",
+  });
+  update("pdf-357", {
+    explanation: "batch_size 决定单步保存的样本激活量；LoRA rank 决定适配矩阵的参数、梯度和优化器状态规模，二者会改变显存峰值。evaluation_step 与 epoch 主要改变评估频率和总时长。",
+  });
+  update("pdf-369", {
+    explanation: "RAG 排障先确认知识库覆盖：如果没有渐冻症内容，检索与生成都无证据可用。确认有内容后，再依次排查解析、切片、Embedding/召回和生成。",
+  });
+  update("pdf-372", {
+    answer: ["A", "B", "F"],
+    explanation: "Runs.create 发起模型 Run（F），Runs.wait 等待模型运行到终态或需要工具（B），forward_and_submit_outputs 提交工具结果后让模型继续处理（A）。Messages.create/list 只写入或读取线程消息，解析 msgs 只是本地数据处理。",
+  });
+  update("pdf-523", {
+    explanation: "B 按标题、段落、列表等结构保留完整语义单元；D 为 Chunk 补充标题或父级上下文；E 直接检测语义边界，均符合语义完整性理念。固定长度、单元格级切分容易破坏语义，代码块切分属于代码专用结构策略。",
+  });
+  update("pdf-629", {
+    explanation: "E 是关键词抽取，不是摘要。A、B 都要求总结主要内容，C、D 都要求一句话概括；原 PDF 的重复选项不影响本题唯一答案。",
+  });
+  update("pdf-636", {
+    explanation: "字符切分、Token 长度切分、语义切分都是常见策略；词性分类不是常见的文档 Chunking 边界，因此选 D。",
+  });
+  update("pdf-650", {
+    answer: ["C"],
+    explanation: "多主题且信息量大的文档应拆成更小 Chunk，使每块更聚焦并减少无关内容被一起召回。纯文本只是文件格式简单，并不构成缩小 Chunk 的理由。",
+  });
+  update("pdf-655", {
+    explanation: "按照营销表达类别逐条检查，可以为绝对化用语、夸张承诺、购买诱导等分别设定标准，降低漏检，因此 B 比一次性混合识别更全面。",
+  });
+  update("pdf-891", {
+    answer: ["B"],
+    explanation: "Runs.wait 会阻塞当前线程，直到 Run 进入终态或 requires_action。它不是实时进度返回函数，也不会替应用执行或等待所有外部工具输出。",
+  });
+  update("pdf-941", {
+    answer: ["A", "B", "C", "D"],
+    explanation: "专业术语误解、翻译方向歧义、仍需人工复核、含糊查询导致偏题，都是实际局限，因此选 A、B、C、D。E 的“完全成熟、无差错”是错误的绝对化表述。",
+  });
+  update("pdf-952", {
+    explanation: "Runs.create 发起模型运行，Runs.wait 等待模型运行结果，_forward_and_submit_outputs 提交工具结果后模型会继续生成；Messages.list 只读取已存储消息，不触发模型推理。因此选 A、B、C。",
+  });
+  update("pdf-961", {
+    answer: ["A", "B"],
+    explanation: "Ragas Answer Correctness 由答案与 ground truth 的语义相似度（A）和事实准确性（B）共同计算。答案与 context 的一致性属于忠实度方向，答案与 query 的一致性属于 Answer Relevancy 方向，答案长度不是组成项。",
+  });
 })();
 
 </script>
@@ -7807,7 +8361,7 @@ window.ACP_QUESTIONS.push(
   const accountIds = Array.from({ length: 10 }, (_, index) => `account-${index + 1}`);
   const accountCredentials = accountIds.map((id, index) => {
     const number = String(index + 1).padStart(2, "0");
-    return { id, username: `acp${number}`, password: `ACP@2026-${number}` };
+    return { id, username: `acp${number}`, password: number };
   });
   let timerId = null;
   let session = null;
@@ -8339,7 +8893,7 @@ window.ACP_QUESTIONS.push(
         <div>
           <div class="eyebrow">知识点学习</div>
           <h1>先懂考点，再做题</h1>
-          <p>第一次学习建议按模块顺序进行：先看必须掌握，再看易混概念和高频陷阱，最后做本模块练习。带虚线下划线的术语可以点击查看白话解释。</p>
+          <p>第一次学习建议按模块顺序进行：先看“完整知识点”，再看题眼判断、易混概念和高频陷阱，最后做本模块练习。每个关键参数独立讲解，带虚线下划线的术语可以点击查看白话解释。</p>
           <div class="hero-actions"><button class="button button-primary" id="continueLearning" type="button">${completed.size ? "继续学习" : "从第 1 模块开始"}</button><button class="button" id="openGlossaryLearning" type="button">先看基础名词</button></div>
         </div>
         <div class="learning-progress"><strong>${completed.size}/${lessons.length}</strong><span>已完成模块</span></div>
@@ -8384,11 +8938,13 @@ window.ACP_QUESTIONS.push(
       </nav>
       <div id="termExplanation" class="term-explanation" hidden></div>
       <article class="lesson-page">
-        <header class="lesson-header"><div><div class="eyebrow">模块 ${index + 1} · 考试占比 ${lesson.weight}% · ${escapeHtml(lesson.examCount)}</div><h1>${escapeHtml(lesson.title)}</h1><p>${renderWithTerms(lesson.summary)}</p></div><div class="weight-badge">${lesson.weight}%</div></header>
+        <header class="lesson-header"><div><div class="eyebrow">模块 ${index + 1} · 考试占比 ${lesson.weight}% · ${escapeHtml(lesson.examCount)}</div><h1>${escapeHtml(lesson.title)}</h1><p>${renderWithTerms(lesson.summary)}</p>${lesson.sourceNote ? `<span class="tag tag-optimized">${escapeHtml(lesson.sourceNote)}</span>` : ""}</div><div class="weight-badge">${lesson.weight}%</div></header>
+        ${lesson.knowledgeSections?.length ? `<section class="lesson-section"><h2>完整知识点</h2><p class="muted">按语雀原文逐项核对后整理；参数、方向关系和适用场景均单独保留。</p><div class="knowledge-groups">${lesson.knowledgeSections.map((group, groupIndex) => `<details class="knowledge-group" ${groupIndex === 0 ? "open" : ""}><summary><strong>${escapeHtml(group.title)}</strong><span>${group.points.length} 个考点</span></summary><ol class="key-point-list">${group.points.map((point) => `<li>${renderWithTerms(point)}</li>`).join("")}</ol></details>`).join("")}</div></section>` : ""}
         <section class="lesson-section decision-section"><h2>看到这些题眼，就这样判断</h2><div class="decision-table">
           ${lesson.examRules.map((rule) => `<article><div><span class="decision-label">题干出现</span>${renderWithTerms(rule.cue)}</div><div><span class="decision-label choose-label">优先选择</span>${renderWithTerms(rule.choose)}</div><div><span class="decision-label avoid-label">不要误选</span>${renderWithTerms(rule.avoid)}</div></article>`).join("")}
         </div></section>
         <section class="lesson-section"><h2>必须掌握</h2><ol class="key-point-list">${lesson.keyPoints.map((point) => `<li>${renderWithTerms(point)}</li>`).join("")}</ol></section>
+        ${lesson.sourceNotes?.length ? `<section class="lesson-section"><h2>语雀资料补充：考场速记</h2><ol class="key-point-list">${lesson.sourceNotes.map((point) => `<li>${renderWithTerms(point)}</li>`).join("")}</ol></section>` : ""}
         <section class="lesson-section"><h2>易混概念对比</h2><div class="contrast-list">${lesson.contrasts.map((item) => `<div>${renderWithTerms(item)}</div>`).join("")}</div></section>
         <section class="lesson-section worked-example"><h2>带你做一道</h2><div class="example-question"><strong>题目：</strong>${renderWithTerms(lesson.workedExample.question)}</div><div><strong>判断过程：</strong>${renderWithTerms(lesson.workedExample.thinking)}</div><div class="example-answer"><strong>结论：</strong>${renderWithTerms(lesson.workedExample.answer)}</div></section>
         <section class="lesson-section trap-section"><h2>高频陷阱</h2><ul>${lesson.traps.map((item) => `<li>${renderWithTerms(item)}</li>`).join("")}</ul></section>

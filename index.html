@@ -8366,14 +8366,21 @@ window.ACP_QUESTIONS.push(
   let timerId = null;
   let session = null;
 
-  const defaultStore = { attempts: [], mistakes: [], favorites: [], studyCompleted: [], theme: "light", active: null };
+  const defaultStore = { attempts: [], mistakes: [], mistakeProgress: {}, favorites: [], studyCompleted: [], theme: "light", active: null };
 
   function normalizeStore(value = {}) {
+    const mistakes = Array.isArray(value.mistakes) ? value.mistakes : [];
+    const mistakeIds = new Set(mistakes);
+    const rawProgress = value.mistakeProgress && typeof value.mistakeProgress === "object" ? value.mistakeProgress : {};
+    const mistakeProgress = Object.fromEntries(Object.entries(rawProgress)
+      .filter(([id]) => mistakeIds.has(id))
+      .map(([id, count]) => [id, Math.max(0, Math.min(2, Number(count) || 0))]));
     return {
       ...defaultStore,
       ...value,
       attempts: Array.isArray(value.attempts) ? value.attempts : [],
-      mistakes: Array.isArray(value.mistakes) ? value.mistakes : [],
+      mistakes,
+      mistakeProgress,
       favorites: Array.isArray(value.favorites) ? value.favorites : [],
       studyCompleted: Array.isArray(value.studyCompleted) ? value.studyCompleted : [],
     };
@@ -8694,6 +8701,7 @@ window.ACP_QUESTIONS.push(
       deadline: session.deadline,
       immediate: session.immediate,
       unlockedIndex: session.unlockedIndex || 0,
+      mistakeRecorded: [...session.mistakeRecorded],
     };
   }
 
@@ -8716,6 +8724,7 @@ window.ACP_QUESTIONS.push(
       questions: restoredQuestions,
       flags: new Set(active.flags || []),
       revealed: new Set(active.revealed || []),
+      mistakeRecorded: new Set(active.mistakeRecorded || []),
       unlockedIndex: active.unlockedIndex || 0,
       finished: false,
     };
@@ -8808,7 +8817,7 @@ window.ACP_QUESTIONS.push(
         <article class="mode-card">
           <div class="mode-meta"><span class="tag tag-primary">薄弱项</span><span class="tag">${store.mistakes.length} 道</span></div>
           <h3>错题重做</h3>
-          <p>自动收集历史答错题目；重新答对后会从错题本移除。</p>
+          <p>答错后自动加入；连续答对 3 次才移除，期间答错会从 0/3 重新开始。</p>
           <button class="button" id="startMistakes" type="button" ${store.mistakes.length ? "" : "disabled"}>练习错题</button>
         </article>
         <article class="mode-card">
@@ -9028,6 +9037,7 @@ window.ACP_QUESTIONS.push(
       answers: {},
       flags: new Set(),
       revealed: new Set(),
+      mistakeRecorded: new Set(),
       index: 0,
       startedAt: now,
       deadline: timeLimit ? now + timeLimit * 1000 : null,
@@ -9070,6 +9080,8 @@ window.ACP_QUESTIONS.push(
     const answeredCount = Object.values(session.answers).filter((value) => value.length).length;
     const percent = Math.round(((session.index + 1) / session.questions.length) * 100);
     const isFavorite = store.favorites.includes(question.id);
+    const isMistake = store.mistakes.includes(question.id);
+    const mistakeProgress = Math.max(0, Math.min(2, Number(store.mistakeProgress?.[question.id]) || 0));
     const stepLocked = session.mode === "step" && !isRevealed;
     const paletteStart = session.questions.length > 100 ? Math.min(Math.max(0, session.index - 24), session.questions.length - 50) : 0;
     const paletteEnd = session.questions.length > 100 ? Math.min(session.questions.length, paletteStart + 50) : session.questions.length;
@@ -9084,7 +9096,7 @@ window.ACP_QUESTIONS.push(
           </div>
           <div class="progress-track" aria-label="答题进度"><div class="progress-fill" style="width:${percent}%"></div></div>
           <article class="question-card">
-            <div class="question-kicker"><span>第 ${session.index + 1} 题 · ${question.type === "single" ? "单选题" : "多选题"} · ${escapeHtml(question.module)}</span>${renderSourceLabel(question)}</div>
+            <div class="question-kicker"><span>第 ${session.index + 1} 题 · ${question.type === "single" ? "单选题" : "多选题"} · ${escapeHtml(question.module)}${isMistake ? ` <span class="tag tag-primary">错题巩固 ${mistakeProgress}/3</span>` : ""}</span>${renderSourceLabel(question)}</div>
             <h2 class="question-text">${renderWithTerms(question.question, session.immediate)}</h2>
             ${session.immediate ? '<div id="termExplanation" class="term-explanation compact" hidden></div>' : ""}
             <div class="options" role="group" aria-label="答案选项">
@@ -9184,11 +9196,12 @@ window.ACP_QUESTIONS.push(
       return;
     }
     session.revealed.add(question.id);
+    if (!session.mistakeRecorded.has(question.id)) {
+      recordMistakeResult(question.id, sameAnswer(session.answers[question.id], question.answer));
+      session.mistakeRecorded.add(question.id);
+    }
     if (session.mode === "step") {
       session.unlockedIndex = Math.min(session.questions.length - 1, Math.max(session.unlockedIndex || 0, session.index + 1));
-      const mistakeSet = new Set(store.mistakes);
-      if (sameAnswer(session.answers[question.id], question.answer)) mistakeSet.delete(question.id); else mistakeSet.add(question.id);
-      store.mistakes = [...mistakeSet];
     }
     persistSession();
     renderQuestion();
@@ -9221,6 +9234,25 @@ window.ACP_QUESTIONS.push(
     return { details, correct, total: session.questions.length, percent: Math.round((earned / possible) * 100) };
   }
 
+  function recordMistakeResult(questionId, isCorrect) {
+    const mistakeSet = new Set(store.mistakes);
+    const progress = { ...(store.mistakeProgress || {}) };
+    if (!isCorrect) {
+      mistakeSet.add(questionId);
+      progress[questionId] = 0;
+    } else if (mistakeSet.has(questionId)) {
+      const nextCount = (Number(progress[questionId]) || 0) + 1;
+      if (nextCount >= 3) {
+        mistakeSet.delete(questionId);
+        delete progress[questionId];
+      } else {
+        progress[questionId] = nextCount;
+      }
+    }
+    store.mistakes = [...mistakeSet];
+    store.mistakeProgress = progress;
+  }
+
   function submitSession(autoSubmitted) {
     if (!session || session.finished) return;
     const unanswered = session.questions.filter((question) => !(session.answers[question.id] || []).length).length;
@@ -9229,11 +9261,11 @@ window.ACP_QUESTIONS.push(
     session.finished = true;
     const result = calculateResult();
 
-    const mistakeSet = new Set(store.mistakes);
     for (const detail of result.details) {
-      if (detail.isCorrect) mistakeSet.delete(detail.question.id); else mistakeSet.add(detail.question.id);
+      if (session.mistakeRecorded.has(detail.question.id)) continue;
+      recordMistakeResult(detail.question.id, detail.isCorrect);
+      session.mistakeRecorded.add(detail.question.id);
     }
-    store.mistakes = [...mistakeSet];
     store.attempts.unshift({
       title: session.title,
       date: new Date().toLocaleString("zh-CN", { hour12: false }),
@@ -9264,7 +9296,7 @@ window.ACP_QUESTIONS.push(
         <div>
           <div class="eyebrow">${autoSubmitted ? "时间到，系统自动交卷" : "练习已完成"}</div>
           <h1>${result.percent >= 80 ? "已达到通过线" : "继续针对薄弱模块练习"}</h1>
-          <p class="muted">答对 ${result.correct}/${result.total} 题，错题已自动加入错题本。正式考试目标建议稳定在 85 分以上。</p>
+          <p class="muted">答对 ${result.correct}/${result.total} 题；答错题已加入错题本，错题连续答对 3 次后移除。正式考试目标建议稳定在 85 分以上。</p>
         </div>
         <div class="result-actions">
           <button class="button button-primary" id="reviewWrong" type="button" ${wrongCount ? "" : "disabled"}>查看 ${wrongCount} 道错题</button>

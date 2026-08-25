@@ -168,6 +168,12 @@ select { width: 100%; min-height: 44px; border: 1px solid var(--line); border-ra
 .question-source { margin: -7px 0 17px; padding: 9px 12px; border-left: 3px solid #e6b84f; background: var(--warning-soft); color: var(--muted); font-size: 12px; }
 .answer-evidence { margin-top: 10px; padding-top: 9px; border-top: 1px dashed color-mix(in srgb, currentColor 30%, transparent); font-size: 13px; }
 .question-text { font-size: clamp(19px, 2.6vw, 25px); line-height: 1.55; margin-bottom: 24px; }
+.speech-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: -7px 0 20px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }
+.speech-toolbar .button { min-height: 36px; padding: 6px 11px; font-size: 13px; }
+.speech-toolbar select { width: auto; min-height: 36px; padding: 5px 8px; font-size: 13px; }
+.speech-status { color: var(--muted); font-size: 12px; margin-right: auto; }
+.speech-toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.speech-toggle input { accent-color: var(--primary); }
 .options { display: grid; gap: 12px; }
 .option { display: grid; grid-template-columns: 26px 1fr; gap: 12px; align-items: start; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-soft); transition: border-color .15s, background .15s; }
 .option:hover { border-color: var(--primary); }
@@ -393,6 +399,8 @@ select { width: 100%; min-height: 44px; border: 1px solid var(--line); border-ra
   .lesson-card { grid-template-columns: 1fr; }
   .lesson-card > .button { grid-column: 1; }
   .term-explanation { flex-direction: column; gap: 2px; }
+  .speech-toolbar { align-items: flex-start; }
+  .speech-status { width: 100%; order: 3; }
 }
 
 @media print {
@@ -8395,8 +8403,16 @@ window.ACP_QUESTIONS.push(
   });
   let timerId = null;
   let session = null;
+  let speechRequestId = 0;
+  let speechState = "idle";
+  let lastSpeechQuestionId = null;
+  let randomReading = false;
+  let randomReadingQueue = [];
+  let randomReadingIndex = 0;
 
-  const defaultStore = { attempts: [], mistakes: [], mistakeProgress: {}, favorites: [], studyCompleted: [], theme: "light", active: null };
+  const speechSupported = "speechSynthesis" in window && "SpeechSynthesisUtterance" in window;
+
+  const defaultStore = { attempts: [], mistakes: [], mistakeProgress: {}, favorites: [], studyCompleted: [], theme: "light", speechRate: 1, speechAuto: false, active: null };
 
   function normalizeStore(value = {}) {
     const mistakes = Array.isArray(value.mistakes) ? value.mistakes : [];
@@ -8413,6 +8429,8 @@ window.ACP_QUESTIONS.push(
       mistakeProgress,
       favorites: Array.isArray(value.favorites) ? value.favorites : [],
       studyCompleted: Array.isArray(value.studyCompleted) ? value.studyCompleted : [],
+      speechRate: [0.75, 1, 1.25, 1.5].includes(Number(value.speechRate)) ? Number(value.speechRate) : 1,
+      speechAuto: Boolean(value.speechAuto),
     };
   }
 
@@ -8494,6 +8512,135 @@ window.ACP_QUESTIONS.push(
       return match;
     });
     return output + escapeHtml(raw.slice(cursor));
+  }
+
+  function updateSpeechControls(status) {
+    const button = document.getElementById("speakButton");
+    const stopButton = document.getElementById("stopSpeechButton");
+    const statusElement = document.getElementById("speechStatus");
+    if (!button || !stopButton || !statusElement) return;
+    const labels = { idle: "朗读本题", speaking: "暂停朗读", paused: "继续朗读" };
+    button.textContent = speechSupported ? `🔊 ${labels[speechState]}` : "浏览器不支持朗读";
+    button.disabled = !speechSupported;
+    stopButton.disabled = !speechSupported || speechState === "idle";
+    statusElement.textContent = status || (speechSupported ? "可朗读题干、选项和正确答案" : "当前浏览器不支持语音朗读");
+  }
+
+  function updateRandomReadingButton() {
+    const button = document.getElementById("randomReadButton");
+    if (!button) return;
+    button.textContent = randomReading ? "⏹ 停止自动阅读" : "🔀 自动随机读题";
+    button.disabled = !speechSupported;
+    button.setAttribute("aria-pressed", String(randomReading));
+  }
+
+  function stopSpeech(status = "已停止朗读") {
+    randomReading = false;
+    speechRequestId += 1;
+    if (speechSupported) window.speechSynthesis.cancel();
+    speechState = "idle";
+    updateSpeechControls(status);
+    updateRandomReadingButton();
+  }
+
+  function speechTextForQuestion(question, questionNumber = session ? session.index + 1 : null, includeAnswer = Boolean(session?.revealed.has(question.id)), includeOptions = true) {
+    const parts = [
+      `${questionNumber ? `第 ${questionNumber} 题。` : "题目。"}${question.type === "single" ? "单选题" : "多选题"}。`,
+      `题目：${question.question}`,
+    ];
+    if (includeOptions) parts.push(...question.options.map((option) => `选项 ${option.key}：${option.text}`));
+    if (includeAnswer) {
+      const correctOptions = question.options
+        .filter((option) => question.answer.includes(option.key))
+        .map((option) => `${option.key}，${option.text}`);
+      parts.push(`正确答案：${correctOptions.join("；") || question.answer.join("、")}`);
+    }
+    return parts.join("。 ");
+  }
+
+  function speakCurrentQuestion() {
+    if (!session || !speechSupported) return;
+    if (window.speechSynthesis.speaking || window.speechSynthesis.paused) {
+      window.speechSynthesis.cancel();
+    }
+    const requestId = ++speechRequestId;
+    const utterance = new SpeechSynthesisUtterance(speechTextForQuestion(session.questions[session.index]));
+    utterance.lang = "zh-CN";
+    utterance.rate = Number(store.speechRate) || 1;
+    utterance.onstart = () => {
+      if (requestId !== speechRequestId) return;
+      speechState = "speaking";
+      updateSpeechControls("正在朗读当前题目");
+    };
+    utterance.onend = () => {
+      if (requestId !== speechRequestId) return;
+      speechState = "idle";
+      updateSpeechControls("本题已朗读完毕");
+    };
+    utterance.onerror = () => {
+      if (requestId !== speechRequestId) return;
+      speechState = "idle";
+      updateSpeechControls("朗读暂时不可用，请重试");
+    };
+    speechState = "speaking";
+    updateSpeechControls("准备朗读当前题目");
+    window.speechSynthesis.speak(utterance);
+  }
+
+  function readNextRandomQuestion() {
+    if (!randomReading || !speechSupported) return;
+    if (randomReadingIndex >= randomReadingQueue.length) {
+      randomReadingQueue = shuffle(questions);
+      randomReadingIndex = 0;
+    }
+    const question = randomReadingQueue[randomReadingIndex];
+    const questionNumber = randomReadingIndex + 1;
+    randomReadingIndex += 1;
+    const requestId = ++speechRequestId;
+    const utterance = new SpeechSynthesisUtterance(speechTextForQuestion(question, questionNumber, true, false));
+    utterance.lang = "zh-CN";
+    utterance.rate = Number(store.speechRate) || 1;
+    utterance.onend = () => {
+      if (requestId !== speechRequestId || !randomReading) return;
+      window.setTimeout(readNextRandomQuestion, 350);
+    };
+    utterance.onerror = () => {
+      if (requestId !== speechRequestId || !randomReading) return;
+      stopSpeech("朗读暂时不可用，请重试");
+    };
+    updateRandomReadingButton();
+    window.speechSynthesis.speak(utterance);
+  }
+
+  function toggleRandomReading() {
+    if (!speechSupported) return;
+    if (randomReading) {
+      stopSpeech("已停止自动阅读");
+      return;
+    }
+    stopSpeech();
+    randomReading = true;
+    randomReadingQueue = shuffle(questions);
+    randomReadingIndex = 0;
+    updateRandomReadingButton();
+    readNextRandomQuestion();
+  }
+
+  function toggleSpeech() {
+    if (!speechSupported) return;
+    if (speechState === "speaking" && window.speechSynthesis.speaking) {
+      window.speechSynthesis.pause();
+      speechState = "paused";
+      updateSpeechControls("朗读已暂停");
+      return;
+    }
+    if (speechState === "paused") {
+      window.speechSynthesis.resume();
+      speechState = "speaking";
+      updateSpeechControls("正在朗读当前题目");
+      return;
+    }
+    speakCurrentQuestion();
   }
 
   function bindTermHelp() {
@@ -8592,6 +8739,8 @@ window.ACP_QUESTIONS.push(
   }
 
   function renderLogin(selectedId = accountIds[0]) {
+    stopSpeech();
+    lastSpeechQuestionId = null;
     clearTimer();
     session = null;
     configureBack("", null);
@@ -8743,6 +8892,8 @@ window.ACP_QUESTIONS.push(
   function restoreSession() {
     const active = store.active;
     if (!active) return false;
+    stopSpeech();
+    lastSpeechQuestionId = null;
     const restoredQuestions = active.questionIds.map(questionById).filter(Boolean);
     if (restoredQuestions.length !== active.questionIds.length) {
       store.active = null;
@@ -8773,6 +8924,8 @@ window.ACP_QUESTIONS.push(
   }
 
   function renderHome() {
+    stopSpeech();
+    lastSpeechQuestionId = null;
     clearTimer();
     session = null;
     configureBack("", null);
@@ -8793,6 +8946,7 @@ window.ACP_QUESTIONS.push(
           <p>全真考试、官方课后题、强化练习、错题重做全部离线运行。当前为“${escapeHtml(accountState.accounts[activeAccountId].name)}”，记录与其他账号完全分开。</p>
           <div class="hero-actions">
             <button class="button button-primary" id="startLearningHero" type="button">先学知识点</button>
+            <button class="button" id="randomReadButton" type="button" aria-pressed="false">🔀 自动随机读题</button>
             ${store.active ? '<button class="button" id="resumeButton" type="button">继续上次练习</button>' : '<button class="button" id="startFullHero" type="button">开始 120 分钟全真考试</button>'}
           </div>
         </div>
@@ -8884,6 +9038,7 @@ window.ACP_QUESTIONS.push(
     document.getElementById("resumeButton")?.addEventListener("click", restoreSession);
     document.getElementById("startLearning")?.addEventListener("click", renderLearningHome);
     document.getElementById("startLearningHero")?.addEventListener("click", renderLearningHome);
+    document.getElementById("randomReadButton")?.addEventListener("click", toggleRandomReading);
     document.getElementById("openGlossaryHome")?.addEventListener("click", openGlossary);
     document.getElementById("startStepPractice")?.addEventListener("click", () => {
       if (hasFullStepSession) restoreSession();
@@ -8917,10 +9072,13 @@ window.ACP_QUESTIONS.push(
       }
     });
     resetScroll();
+    updateRandomReadingButton();
     app.focus();
   }
 
   function renderLearningHome() {
+    stopSpeech();
+    lastSpeechQuestionId = null;
     clearTimer();
     session = null;
     configureBack("← 返回首页", renderHome);
@@ -8967,6 +9125,8 @@ window.ACP_QUESTIONS.push(
   }
 
   function renderLesson(index) {
+    stopSpeech();
+    lastSpeechQuestionId = null;
     const lesson = lessons[index];
     if (!lesson) return renderLearningHome();
     configureBack("← 模块目录", renderLearningHome);
@@ -9059,6 +9219,8 @@ window.ACP_QUESTIONS.push(
 
   function startSession(title, mode, selectedQuestions, timeLimit, immediate) {
     if (!selectedQuestions.length) return;
+    stopSpeech();
+    lastSpeechQuestionId = null;
     const now = Date.now();
     session = {
       title,
@@ -9100,6 +9262,9 @@ window.ACP_QUESTIONS.push(
 
   function renderQuestion() {
     if (!session) return renderHome();
+    stopSpeech();
+    const autoReadQuestion = speechSupported && store.speechAuto && lastSpeechQuestionId !== session.questions[session.index].id;
+    lastSpeechQuestionId = session.questions[session.index].id;
     configureBack("← 保存并返回", () => {
       persistSession();
       renderHome();
@@ -9126,9 +9291,16 @@ window.ACP_QUESTIONS.push(
           </div>
           <div class="progress-track" aria-label="答题进度"><div class="progress-fill" style="width:${percent}%"></div></div>
           <article class="question-card">
-            <div class="question-kicker"><span>第 ${session.index + 1} 题 · ${question.type === "single" ? "单选题" : "多选题"} · ${escapeHtml(question.module)}${isMistake ? ` <span class="tag tag-primary">错题巩固 ${mistakeProgress}/3</span>` : ""}</span>${renderSourceLabel(question)}</div>
-            <h2 class="question-text">${renderWithTerms(question.question, session.immediate)}</h2>
-            ${session.immediate ? '<div id="termExplanation" class="term-explanation compact" hidden></div>' : ""}
+             <div class="question-kicker"><span>第 ${session.index + 1} 题 · ${question.type === "single" ? "单选题" : "多选题"} · ${escapeHtml(question.module)}${isMistake ? ` <span class="tag tag-primary">错题巩固 ${mistakeProgress}/3</span>` : ""}</span>${renderSourceLabel(question)}</div>
+             <h2 class="question-text">${renderWithTerms(question.question, session.immediate)}</h2>
+             <div class="speech-toolbar" aria-label="语音读题">
+               <button class="button button-primary" id="speakButton" type="button">🔊 朗读本题</button>
+               <button class="button" id="stopSpeechButton" type="button" disabled>停止</button>
+               <label class="speech-toggle" for="speechRate">语速<select id="speechRate" aria-label="朗读语速"><option value="0.75" ${store.speechRate === 0.75 ? "selected" : ""}>0.75x</option><option value="1" ${store.speechRate === 1 ? "selected" : ""}>1x</option><option value="1.25" ${store.speechRate === 1.25 ? "selected" : ""}>1.25x</option><option value="1.5" ${store.speechRate === 1.5 ? "selected" : ""}>1.5x</option></select></label>
+               <label class="speech-toggle"><input id="speechAuto" type="checkbox" ${store.speechAuto ? "checked" : ""}>切题自动朗读</label>
+               <span class="speech-status" id="speechStatus">${speechSupported ? "可朗读题干、选项和正确答案" : "当前浏览器不支持语音朗读"}</span>
+             </div>
+             ${session.immediate ? '<div id="termExplanation" class="term-explanation compact" hidden></div>' : ""}
             <div class="options" role="group" aria-label="答案选项">
               ${question.options.map((option) => `
                 <label class="option">
@@ -9178,10 +9350,23 @@ window.ACP_QUESTIONS.push(
     document.getElementById("revealButton")?.addEventListener("click", revealAnswer);
     document.getElementById("submitButton").addEventListener("click", () => submitSession(false));
     document.getElementById("exitButton").addEventListener("click", () => { persistSession(); renderHome(); });
+    document.getElementById("speakButton")?.addEventListener("click", toggleSpeech);
+    document.getElementById("stopSpeechButton")?.addEventListener("click", () => stopSpeech());
+    document.getElementById("speechRate")?.addEventListener("change", (event) => {
+      store.speechRate = Number(event.target.value) || 1;
+      saveStore();
+    });
+    document.getElementById("speechAuto")?.addEventListener("change", (event) => {
+      store.speechAuto = event.target.checked;
+      saveStore();
+      if (store.speechAuto) speakCurrentQuestion();
+    });
     bindTermHelp();
     updateTimer();
     resetScroll();
     app.focus();
+    updateSpeechControls();
+    if (autoReadQuestion) window.setTimeout(speakCurrentQuestion, 120);
   }
 
   function handleAnswer(event) {
@@ -9287,6 +9472,7 @@ window.ACP_QUESTIONS.push(
     if (!session || session.finished) return;
     const unanswered = session.questions.filter((question) => !(session.answers[question.id] || []).length).length;
     if (!autoSubmitted && unanswered && !window.confirm(`还有 ${unanswered} 道题未作答，确定交卷吗？`)) return;
+    stopSpeech();
     clearTimer();
     session.finished = true;
     const result = calculateResult();
@@ -9310,6 +9496,8 @@ window.ACP_QUESTIONS.push(
   }
 
   function renderResult(result, autoSubmitted) {
+    stopSpeech();
+    lastSpeechQuestionId = null;
     configureBack("← 返回首页", renderHome);
     const byModule = {};
     for (const detail of result.details) {
@@ -9348,6 +9536,8 @@ window.ACP_QUESTIONS.push(
   }
 
   function renderReview(details, title, onBack = renderHome) {
+    stopSpeech();
+    lastSpeechQuestionId = null;
     configureBack("← 返回成绩", onBack);
     app.innerHTML = `
       <div class="section-title"><div><h1>${escapeHtml(title)}</h1><p class="muted">你的答案、正确答案和解析都列在下方。</p></div><div class="action-group"><button class="button" id="printReview" type="button">打印</button><button class="button button-primary" id="reviewHome" type="button">返回首页</button></div></div>
